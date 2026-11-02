@@ -20,6 +20,7 @@ const (
 	Version3            = 3
 	Version4            = 4
 	Version5            = 5
+	Version6            = 6
 	DefaultSnellVersion = Version1
 
 	// max packet length
@@ -50,16 +51,28 @@ type Snell struct {
 	net.Conn
 	buffer [1]byte
 	reply  bool
+	readMu sync.Mutex
 }
 
 func (s *Snell) Read(b []byte) (int, error) {
-	if err := s.ReadReply(); err != nil {
+	s.readMu.Lock()
+	defer s.readMu.Unlock()
+	if len(b) == 0 {
+		return 0, nil
+	}
+	if err := s.readReply(); err != nil {
 		return 0, err
 	}
 	return s.Conn.Read(b)
 }
 
 func (s *Snell) ReadReply() error {
+	s.readMu.Lock()
+	defer s.readMu.Unlock()
+	return s.readReply()
+}
+
+func (s *Snell) readReply() error {
 	if s.reply {
 		return nil
 	}
@@ -154,6 +167,13 @@ func HalfClose(conn net.Conn) error {
 }
 
 func StreamConn(conn net.Conn, psk []byte, version int) *Snell {
+	if version == Version6 {
+		sc, err := StreamConnV6(conn, psk, "")
+		if err != nil {
+			return &Snell{Conn: &invalidSnellConn{Conn: conn, err: err}}
+		}
+		return sc
+	}
 	if version >= Version4 {
 		return &Snell{Conn: newV4Conn(conn, psk)}
 	}
@@ -440,4 +460,11 @@ func (pc *packetConn) ReadFrom(b []byte) (int, net.Addr, error) {
 	}
 
 	return n, addr, nil
+}
+
+func (s *Snell) CloseWrite() error {
+	if c, ok := s.Conn.(*v6Conn); ok {
+		return c.CloseWrite()
+	}
+	return s.Conn.Close()
 }

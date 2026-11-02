@@ -37,6 +37,8 @@ type SnellOption struct {
 	Psk               string         `proxy:"psk"`
 	UDP               bool           `proxy:"udp,omitempty"`
 	Version           int            `proxy:"version,omitempty"`
+	V6Mode            string         `proxy:"v6-mode,omitempty"`
+	ClientID          string         `proxy:"client-id,omitempty"`
 	Reuse             bool           `proxy:"reuse,omitempty"`
 	ObfsOpts          map[string]any `proxy:"obfs-opts,omitempty"`
 	ClientFingerprint string         `proxy:"client-fingerprint,omitempty"`
@@ -66,6 +68,9 @@ func (s *Snell) streamConnContext(ctx context.Context, c net.Conn) (*snell.Snell
 			return nil, err
 		}
 	}
+	if s.version == snell.Version6 {
+		return snell.StreamConnV6(c, s.psk, s.option.V6Mode)
+	}
 	return snell.StreamConn(c, s.psk, s.version), nil
 }
 
@@ -86,13 +91,20 @@ func (s *Snell) writeHeaderContext(ctx context.Context, c net.Conn, metadata *C.
 	}
 
 	if metadata.NetWork == C.UDP {
-		err = snell.WriteUDPHeader(c, s.version)
+		if s.version == snell.Version6 {
+			err = snell.WriteHeaderV6(c, "", 0, true, s.option.ClientID)
+		} else {
+			err = snell.WriteUDPHeader(c, s.version)
+		}
 		if err == nil && s.version >= snell.Version4 {
 			if sc, ok := c.(*snell.Snell); ok {
 				err = sc.ReadReply()
 			}
 		}
 		return
+	}
+	if s.version == snell.Version6 {
+		return snell.WriteHeaderV6(c, metadata.String(), uint(metadata.DstPort), false, s.option.ClientID)
 	}
 	err = snell.WriteHeaderWithReuse(c, metadata.String(), uint(metadata.DstPort), s.version, s.reuse)
 	return
@@ -177,6 +189,24 @@ func NewSnell(option SnellOption) (*Snell, error) {
 	var shadowTLSOpt *shadowtls.ShadowTLSOption
 	var restlsConfig *restls.Config
 	var jlsConfig *jls.ClientConfig
+	if option.Version == snell.Version6 {
+		if len(psk) < 12 || len(psk) > 255 {
+			return nil, fmt.Errorf("snell: v6 psk length must be 12..255 bytes")
+		}
+		if _, err := snell.ParseMode(option.V6Mode); err != nil {
+			return nil, err
+		}
+		if len(option.ClientID) > 255 {
+			return nil, fmt.Errorf("snell: client-id exceeds 255 bytes")
+		}
+		if option.Reuse {
+			return nil, fmt.Errorf("snell: v6 does not support connection reuse")
+		}
+		if obfsOption.Mode != "" && obfsOption.Mode != "none" {
+			return nil, fmt.Errorf("snell: v6 does not support external obfs wrappers")
+		}
+		obfsOption.Mode = ""
+	}
 	switch obfsOption.Mode {
 	case "tls", "http", "":
 		break
@@ -255,7 +285,7 @@ func NewSnell(option SnellOption) (*Snell, error) {
 		if option.UDP {
 			return nil, fmt.Errorf("snell version %d not support UDP", option.Version)
 		}
-	case snell.Version3, snell.Version4:
+	case snell.Version3, snell.Version4, snell.Version6:
 	default:
 		return nil, fmt.Errorf("snell version error: %d", option.Version)
 	}

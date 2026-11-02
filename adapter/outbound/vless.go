@@ -153,6 +153,9 @@ type XHTTPDownloadSettings struct {
 }
 
 func (v *Vless) StreamConnContext(ctx context.Context, c net.Conn, metadata *C.Metadata) (_ net.Conn, err error) {
+	if metadata.NetWork == C.UDP && metadata.DstPort == 443 && v.option.Flow == vless.XRV {
+		return nil, errors.New("XTLS rejected UDP/443 traffic")
+	}
 	switch v.option.Network {
 	case "ws":
 		host, port, _ := net.SplitHostPort(v.addr)
@@ -367,6 +370,9 @@ func (v *Vless) DialContext(ctx context.Context, metadata *C.Metadata) (_ C.Conn
 
 // ListenPacketContext implements C.ProxyAdapter
 func (v *Vless) ListenPacketContext(ctx context.Context, metadata *C.Metadata) (_ C.PacketConn, err error) {
+	if metadata.DstPort == 443 && v.option.Flow == vless.XRV {
+		return nil, errors.New("XTLS rejected UDP/443 traffic")
+	}
 	if err = v.ResolveUDP(ctx, metadata); err != nil {
 		return nil, err
 	}
@@ -389,18 +395,36 @@ func (v *Vless) ListenPacketContext(ctx context.Context, metadata *C.Metadata) (
 		if metadata.SourceValid() {
 			globalID = utils.GlobalID(metadata.SourceAddress())
 		}
-		return NewPacketConn(N.NewThreadSafePacketConn(
+		return v.packetConn(N.NewThreadSafePacketConn(
 			vmessSing.NewXUDPConn(c,
 				globalID,
 				M.SocksaddrFromNet(metadata.UDPAddr())),
-		), v), nil
+		)), nil
 	} else if v.option.PacketAddr {
-		return NewPacketConn(N.NewThreadSafePacketConn(
+		return v.packetConn(N.NewThreadSafePacketConn(
 			packetaddr.NewConn(v.client.PacketConn(c, metadata.UDPAddr()),
 				M.SocksaddrFromNet(metadata.UDPAddr())),
-		), v), nil
+		)), nil
 	}
-	return NewPacketConn(N.NewThreadSafePacketConn(v.client.PacketConn(c, metadata.UDPAddr())), v), nil
+	return v.packetConn(N.NewThreadSafePacketConn(v.client.PacketConn(c, metadata.UDPAddr()))), nil
+}
+
+func (v *Vless) packetConn(pc N.EnhancePacketConn) C.PacketConn {
+	if v.option.Flow == vless.XRV {
+		pc = &vlessVisionPacketConn{pc}
+	}
+	return NewPacketConn(pc, v)
+}
+
+type vlessVisionPacketConn struct {
+	N.EnhancePacketConn
+}
+
+func (pc *vlessVisionPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) {
+	if M.SocksaddrFromNet(addr).Port == 443 {
+		return 0, errors.New("XTLS rejected UDP/443 traffic")
+	}
+	return pc.EnhancePacketConn.WriteTo(p, addr)
 }
 
 // SupportUOT implements C.ProxyAdapter
@@ -460,15 +484,31 @@ func parseVlessAddr(metadata *C.Metadata, xudp bool) *vless.DstAddr {
 }
 
 func NewVless(option VlessOption) (*Vless, error) {
+	switch strings.ToLower(option.Network) {
+	case "", "tcp", "raw":
+		option.Network = "tcp"
+	case "ws", "websocket":
+		option.Network = "ws"
+	case "httpupgrade":
+		option.Network = "ws"
+		option.WSOpts.V2rayHttpUpgrade = true
+	case "xhttp", "splithttp":
+		option.Network = "xhttp"
+	case "http", "h2", "grpc":
+		option.Network = strings.ToLower(option.Network)
+	default:
+		return nil, fmt.Errorf("unsupported VLESS network: %s", option.Network)
+	}
+
 	var addons *vless.Addons
-	if len(option.Flow) >= 16 {
-		option.Flow = option.Flow[:16]
-		if option.Flow != vless.XRV {
-			return nil, fmt.Errorf("unsupported xtls flow type: %s", option.Flow)
-		}
+	switch option.Flow {
+	case "":
+	case vless.XRV, vless.XRV + "-udp443":
 		addons = &vless.Addons{
-			Flow: option.Flow,
+			Flow: vless.XRV,
 		}
+	default:
+		return nil, fmt.Errorf("unsupported xtls flow type: %s", option.Flow)
 	}
 
 	switch option.PacketEncoding {
@@ -482,6 +522,9 @@ func NewVless(option VlessOption) (*Vless, error) {
 	}
 	if option.XUDP {
 		option.PacketAddr = false
+	}
+	if addons != nil && option.PacketAddr {
+		return nil, errors.New("XTLS Vision requires XUDP instead of packetaddr")
 	}
 
 	client, err := vless.NewClient(option.UUID, addons)
@@ -529,7 +572,7 @@ func NewVless(option VlessOption) (*Vless, error) {
 	if err != nil {
 		return nil, err
 	}
-	v.realityConfig, err = v.option.RealityOpts.Parse()
+	v.realityConfig, err = v.option.RealityOpts.ParseForNetwork(option.Network)
 	if err != nil {
 		return nil, err
 	}

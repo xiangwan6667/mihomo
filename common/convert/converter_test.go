@@ -217,21 +217,22 @@ func TestConvertsV2RayRealityMLKEM768(t *testing.T) {
 					"?security=reality&type=tcp&sid=00112233&pbk=" + tt.publicKey + tt.query
 				for _, input := range []string{uri, base64.StdEncoding.EncodeToString([]byte(uri))} {
 					proxies, err := ConvertsV2Ray([]byte(input))
+					if tt.publicKey == "" {
+						assert.Error(t, err)
+						assert.Empty(t, proxies)
+						continue
+					}
 					if !assert.NoError(t, err) || !assert.Len(t, proxies, 1) {
 						return
 					}
-					if tt.publicKey == "" {
-						assert.NotContains(t, proxies[0], "reality-opts")
-					} else {
-						expected := map[string]any{
-							"public-key": tt.publicKey,
-							"short-id":   "00112233",
-						}
-						if tt.want != nil {
-							expected["support-x25519mlkem768"] = tt.want
-						}
-						assert.Equal(t, expected, proxies[0]["reality-opts"])
+					expected := map[string]any{
+						"public-key": tt.publicKey,
+						"short-id":   "00112233",
 					}
+					if tt.want != nil {
+						expected["support-x25519mlkem768"] = tt.want
+					}
+					assert.Equal(t, expected, proxies[0]["reality-opts"])
 					_, err = adapter.ParseProxy(proxies[0])
 					assert.NoError(t, err)
 				}

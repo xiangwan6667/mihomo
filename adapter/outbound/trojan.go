@@ -281,6 +281,20 @@ func (t *Trojan) Close() error {
 }
 
 func NewTrojan(option TrojanOption) (*Trojan, error) {
+	switch strings.ToLower(option.Network) {
+	case "", "tcp", "raw":
+		option.Network = "tcp"
+	case "ws", "websocket":
+		option.Network = "ws"
+	case "httpupgrade":
+		option.Network = "ws"
+		option.WSOpts.V2rayHttpUpgrade = true
+	case "grpc":
+		option.Network = "grpc"
+	default:
+		return nil, fmt.Errorf("unsupported Trojan network: %s", option.Network)
+	}
+
 	addr := net.JoinHostPort(option.Server, strconv.Itoa(option.Port))
 
 	if option.SNI == "" {
@@ -322,7 +336,7 @@ func NewTrojan(option TrojanOption) (*Trojan, error) {
 	if err != nil {
 		return nil, err
 	}
-	t.realityConfig, err = option.RealityOpts.Parse()
+	t.realityConfig, err = option.RealityOpts.ParseForNetwork(option.Network)
 	if err != nil {
 		return nil, err
 	}

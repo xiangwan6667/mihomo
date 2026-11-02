@@ -473,6 +473,20 @@ func (v *Vmess) SupportUOT() bool {
 }
 
 func NewVmess(option VmessOption) (*Vmess, error) {
+	switch strings.ToLower(option.Network) {
+	case "", "tcp", "raw":
+		option.Network = "tcp"
+	case "ws", "websocket":
+		option.Network = "ws"
+	case "httpupgrade":
+		option.Network = "ws"
+		option.WSOpts.V2rayHttpUpgrade = true
+	case "http", "h2", "grpc", "mekya", "mkcp", "kcp":
+		option.Network = strings.ToLower(option.Network)
+	default:
+		return nil, fmt.Errorf("unsupported VMess network: %s", option.Network)
+	}
+
 	security := strings.ToLower(option.Cipher)
 	var options []vmess.ClientOption
 	if option.GlobalPadding {
@@ -532,7 +546,7 @@ func NewVmess(option VmessOption) (*Vmess, error) {
 	if err != nil {
 		return nil, err
 	}
-	v.realityConfig, err = v.option.RealityOpts.Parse()
+	v.realityConfig, err = v.option.RealityOpts.ParseForNetwork(option.Network)
 	if err != nil {
 		return nil, err
 	}

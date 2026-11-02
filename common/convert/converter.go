@@ -190,13 +190,18 @@ func ConvertsV2Ray(buf []byte) ([]map[string]any, error) {
 			}
 
 			switch network {
-			case "ws":
+			case "ws", "websocket", "httpupgrade":
 				headers := make(map[string]any)
 				wsOpts := make(map[string]any)
 
 				headers["User-Agent"] = RandUserAgent()
 
 				wsOpts["path"] = query.Get("path")
+				headers["Host"] = query.Get("host")
+				if network == "httpupgrade" {
+					wsOpts["v2ray-http-upgrade"] = true
+				}
+				trojan["network"] = "ws"
 				wsOpts["headers"] = headers
 
 				trojan["ws-opts"] = wsOpts
@@ -217,6 +222,13 @@ func ConvertsV2Ray(buf []byte) ([]map[string]any, error) {
 				trojan["fingerprint"] = pcs
 			}
 
+			options, err := realityShareOptions(query)
+			if err != nil {
+				continue
+			}
+			if options != nil {
+				trojan["reality-opts"] = options
+			}
 			proxies = append(proxies, trojan)
 
 		case "vless":
@@ -231,7 +243,7 @@ func ConvertsV2Ray(buf []byte) ([]map[string]any, error) {
 			vless := make(map[string]any, 20)
 			err = handleVShareLink(names, urlVLess, scheme, vless)
 			if err != nil {
-				log.Warnln("error:%s line:%s", err.Error(), line)
+				log.Warnln("invalid %s share link", scheme)
 				continue
 			}
 			if flow := query.Get("flow"); flow != "" {
@@ -256,7 +268,7 @@ func ConvertsV2Ray(buf []byte) ([]map[string]any, error) {
 				vmess := make(map[string]any, 20)
 				err = handleVShareLink(names, urlVMess, scheme, vmess)
 				if err != nil {
-					log.Warnln("error:%s line:%s", err.Error(), line)
+					log.Warnln("invalid %s share link", scheme)
 					continue
 				}
 				vmess["alterId"] = 0

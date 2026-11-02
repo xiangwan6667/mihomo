@@ -43,16 +43,11 @@ func handleVShareLink(names map[string]int, url *url.URL, scheme string, proxy m
 	if sni := query.Get("sni"); sni != "" {
 		proxy["servername"] = sni
 	}
-	if realityPublicKey := query.Get("pbk"); realityPublicKey != "" {
-		realityOpts := map[string]any{
-			"public-key": realityPublicKey,
-			"short-id":   query.Get("sid"),
-		}
-		if value := query.Get("support-x25519mlkem768"); value != "" {
-			if enabled, err := strconv.ParseBool(value); err == nil {
-				realityOpts["support-x25519mlkem768"] = enabled
-			}
-		}
+	realityOpts, err := realityShareOptions(query)
+	if err != nil {
+		return err
+	}
+	if realityOpts != nil {
 		proxy["reality-opts"] = realityOpts
 	}
 
@@ -65,6 +60,14 @@ func handleVShareLink(names map[string]int, url *url.URL, scheme string, proxy m
 	}
 
 	network := strings.ToLower(query.Get("type"))
+	switch network {
+	case "raw":
+		network = "tcp"
+	case "websocket":
+		network = "ws"
+	case "splithttp":
+		network = "xhttp"
+	}
 	if network == "" {
 		network = "tcp"
 	}
@@ -166,6 +169,32 @@ func handleVShareLink(names map[string]int, url *url.URL, scheme string, proxy m
 	}
 
 	return nil
+}
+
+func realityShareOptions(query url.Values) (map[string]any, error) {
+	key := query.Get("pbk")
+	if key == "" {
+		if strings.EqualFold(query.Get("security"), "reality") || query.Get("sid") != "" || query.Get("pqv") != "" || query.Get("mldsa65-verify") != "" || query.Get("client-version") != "" {
+			return nil, errors.New("REALITY public key is required")
+		}
+		return nil, nil
+	}
+	options := map[string]any{"public-key": key, "short-id": query.Get("sid")}
+	if value := query.Get("support-x25519mlkem768"); value != "" {
+		if enabled, err := strconv.ParseBool(value); err == nil {
+			options["support-x25519mlkem768"] = enabled
+		}
+	}
+	if value := query.Get("pqv"); value != "" {
+		options["mldsa65-verify"] = value
+	}
+	if value := query.Get("mldsa65-verify"); value != "" {
+		options["mldsa65-verify"] = value
+	}
+	if value := query.Get("client-version"); value != "" {
+		options["client-version"] = value
+	}
+	return options, nil
 }
 
 // parseXHTTPExtra maps xray-core extra JSON fields to mihomo xhttp-opts fields.
@@ -336,6 +365,18 @@ func parseXHTTPExtra(extra map[string]any, opts map[string]any) {
 					realityOpts := make(map[string]any)
 					if pk, ok := realityAny["publicKey"].(string); ok && pk != "" {
 						realityOpts["public-key"] = pk
+					}
+					if password, ok := realityAny["password"].(string); ok && password != "" {
+						realityOpts["public-key"] = password
+					}
+					if key, ok := realityAny["mldsa65Verify"].(string); ok && key != "" {
+						realityOpts["mldsa65-verify"] = key
+					}
+					if name, ok := realityAny["serverName"].(string); ok && name != "" {
+						ds["servername"] = name
+					}
+					if fp, ok := realityAny["fingerprint"].(string); ok && fp != "" {
+						ds["client-fingerprint"] = fp
 					}
 					if sid, ok := realityAny["shortId"].(string); ok && sid != "" {
 						realityOpts["short-id"] = sid

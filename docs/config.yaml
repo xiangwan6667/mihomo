@@ -1725,6 +1725,25 @@ proxies: # socks5
     #   username: jls-user
     #   password: jls-password
 
+  # miu: TLS 1.3 or REALITY, with UDP over a Miu stream
+  - name: miu
+    type: miu
+    server: 1.2.3.4
+    port: 443
+    psk: "<your psk of at least 16 characters>"
+    udp: true
+    # tls: true # accepted for compatibility; Miu always uses TLS
+    # sni: example.com # servername is also accepted
+    # skip-cert-verify: false
+    # fingerprint: xxxx # SHA-256 certificate fingerprint
+    # client-fingerprint: chrome
+    # alpn: [h2, http/1.1]
+    # reality-opts: # requires client-fingerprint
+    #   public-key: xxxx
+    #   short-id: xxxx
+    # idle-session-timeout: 30 # seconds
+    # min-idle-session: 2
+
   # trusttunnel
   - name: trusttunnel
     type: trusttunnel

@@ -84,6 +84,10 @@ func (m *Miu) Close() error {
 	return m.client.Close()
 }
 
+func (m *Miu) CloseIdle() {
+	m.client.CloseIdle()
+}
+
 // dialLane opens the outer connection of a lane: TCP through the proxy's dialer, then TLS, uTLS or
 // REALITY. The TLS connection is returned as it is, without any wrapper around it: the library needs
 // to reach into it for raw segments.
